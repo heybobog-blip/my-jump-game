@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jump Dash - Leaderboard</title>
+    <title>Jump Dash - Pro Leaderboard</title>
     <style>
         body { margin: 0; padding: 0; background-color: #202028; overflow: hidden; font-family: 'Arial', sans-serif; user-select: none; -webkit-user-select: none; }
         canvas { display: block; margin: 0 auto; background: #202028; touch-action: none; }
@@ -17,8 +17,6 @@
             pointer-events: auto; cursor: pointer; z-index: 20;
         }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
-        
-        /* Loading Spinner */
         #loading { display: none; color: yellow; font-size: 14px; margin-top: 10px; }
     </style>
     <script src="https://telegram.org/js/games.js"></script>
@@ -28,115 +26,84 @@
     <div id="ui-layer">
         <div id="startMsg" onclick="handleStart()">
             TAP TO PLAY<br>
-            <span style="font-size:16px; color:#F1C40F">▶ Geometry Style</span>
-            <div id="loading">กำลังบันทึกคะแนน...</div>
+            <span style="font-size:16px; color:#F1C40F">▶ Start Game</span>
+            <div id="loading">...</div>
         </div>
     </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
-        // --- ส่วนตั้งค่าการส่งคะแนน ---
-        // ใส่ลิงก์ของคุณให้เรียบร้อยแล้วครับ
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbwkma8CNPj9gayXeOymVKeXQISPL5Zl5jbrM9FVvZJ8F7DPHWAEEHxmg01YZXKRs7v-OA/exec"; 
+        // --- ส่วนสำคัญ: วาง URL ของ Google Apps Script (จากขั้นตอนที่ 2) ตรงนี้ ---
+        const GAS_URL = "วาง_URL_ยาวๆ_จาก_GOOGLE_APPS_SCRIPT_ตรงนี้"; 
 
         // เริ่มต้น Telegram WebApp
         const tg = window.Telegram.WebApp;
-        tg.expand(); // ขยายเต็มจอ
+        tg.expand();
 
-        // ดึงข้อมูลผู้เล่น
+        // ดึงข้อมูล User และ Chat ID จาก URL (ที่บอทส่งมาให้)
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatId = urlParams.get('chat_id');
+        const messageId = urlParams.get('message_id');
         const user = tg.initDataUnsafe.user;
         
         function saveScoreToTelegram(finalScore) {
-            if (!user) {
-                console.log("ไม่พบข้อมูลผู้เล่น (อาจจะเล่นบน Browser ปกติ)");
+            if (!user || !chatId || !messageId) {
+                console.log("ขาดข้อมูล User หรือ Chat ID (เล่นผ่านเว็บตรงๆ จะไม่บันทึก)");
                 return;
             }
 
             document.getElementById('loading').style.display = 'block';
-            document.getElementById('startMsg').innerHTML += "<br><small>Sending Score...</small>";
+            document.getElementById('loading').innerText = "กำลังส่งคะแนน...";
 
-            // เตรียมข้อมูลส่ง
-            let url = `${GAS_URL}?user_id=${user.id}&score=${finalScore}`;
+            // ส่งข้อมูลกลับไปที่ Google Script
+            let url = `${GAS_URL}?user_id=${user.id}&score=${finalScore}&chat_id=${chatId}&message_id=${messageId}`;
             
-            // ใช้ fetch ยิงไปหา Google Script
             fetch(url)
             .then(response => response.text())
             .then(data => {
                 console.log("Save Result:", data);
-                document.getElementById('loading').innerText = "บันทึกคะแนนแล้ว!";
-                setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 2000);
+                document.getElementById('loading').innerText = "บันทึกคะแนนเรียบร้อย!";
+                // สั่นเตือนเมื่อบันทึกเสร็จ
+                if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             })
             .catch(error => {
-                console.error("Save Error:", error);
-                document.getElementById('loading').innerText = "บันทึกไม่สำเร็จ";
+                document.getElementById('loading').innerText = "Error Saving Score";
             });
         }
 
-        // --- GAME LOGIC ---
+        // --- GAME ENGINE (โค้ดเกม) ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let width, height;
-
-        const bgMusic = new Audio('bgm.mp3'); 
-        bgMusic.loop = true; 
-        bgMusic.volume = 0.7;
-
-        let gameRunning = false;
-        let score = 0;
-        let frames = 0;
-        let speed = 9;
-        
+        const bgMusic = new Audio('bgm.mp3'); bgMusic.loop = true; bgMusic.volume = 0.7;
+        let gameRunning = false; let score = 0; let frames = 0; let speed = 9;
         const hero = { x: 100, y: 0, size: 40, dy: 0, jumpPower: -15, gravity: 1.1, grounded: false, angle: 0, trail: [] };
-        let obstacles = [];
-        let particles = [];
+        let obstacles = []; let particles = [];
 
         function resize() {
-            width = window.innerWidth;
-            height = window.innerHeight;
-            canvas.width = width;
-            canvas.height = height;
+            width = window.innerWidth; height = window.innerHeight;
+            canvas.width = width; canvas.height = height;
             if(!gameRunning) hero.y = height - 120 - hero.size;
         }
-        window.addEventListener('resize', resize);
-        resize();
+        window.addEventListener('resize', resize); resize();
 
         function startGame() {
-            gameRunning = true;
-            score = 0; frames = 0; obstacles = []; particles = [];
+            gameRunning = true; score = 0; frames = 0; obstacles = []; particles = [];
             hero.y = height - 120 - hero.size; hero.dy = 0; hero.angle = 0; hero.trail = [];
             document.getElementById('startMsg').style.display = 'none';
-            bgMusic.currentTime = 0;
-            bgMusic.play().catch(e => console.log("Audio Error:", e));
+            bgMusic.currentTime = 0; bgMusic.play().catch(e=>{});
         }
-
         function handleStart() { if (!gameRunning) startGame(); }
         function jump() {
-            if (!gameRunning) {
-                if(document.getElementById('startMsg').style.display !== 'none') startGame();
-                return;
-            }
-            if (hero.grounded) {
-                hero.dy = hero.jumpPower; hero.grounded = false;
-                hero.angle = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2);
-            }
+            if (!gameRunning) { if(document.getElementById('startMsg').style.display !== 'none') startGame(); return; }
+            if (hero.grounded) { hero.dy = hero.jumpPower; hero.grounded = false; hero.angle = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2); }
         }
-
         window.addEventListener('touchstart', (e) => { if(e.target.id !== 'startMsg') { e.preventDefault(); jump(); } }, {passive: false});
         window.addEventListener('mousedown', (e) => { if(e.target.id !== 'startMsg') jump(); });
         window.addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });
 
-        function createParticles(x, y) {
-            for(let i=0; i<30; i++) {
-                particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 1.0, color: `hsl(${Math.random()*60 + 20}, 100%, 50%)` });
-            }
-        }
-
         function update() {
-            if (!gameRunning) {
-                particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= 0.05; });
-                particles = particles.filter(p => p.life > 0);
-                return;
-            }
+            if (!gameRunning) { particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= 0.05; }); particles = particles.filter(p => p.life > 0); return; }
             hero.dy += hero.gravity; hero.y += hero.dy;
             if(!hero.grounded) { hero.angle += 0.15; } else { let target = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2); hero.angle += (target - hero.angle) * 0.2; }
             let groundLevel = height - 120;
@@ -144,10 +111,7 @@
             if(frames % 3 === 0) { hero.trail.push({x: hero.x, y: hero.y, angle: hero.angle, alpha: 0.6}); if(hero.trail.length > 6) hero.trail.shift(); }
             hero.trail.forEach(t => t.x -= speed);
             frames++;
-            if (frames % Math.floor(1300/speed) === 0) { 
-                let type = Math.random();
-                if(type > 0.7) { obstacles.push({ x: width, y: groundLevel }); obstacles.push({ x: width + 40, y: groundLevel }); } else { obstacles.push({ x: width, y: groundLevel }); }
-            }
+            if (frames % Math.floor(1300/speed) === 0) { let type = Math.random(); if(type > 0.7) { obstacles.push({ x: width, y: groundLevel }); obstacles.push({ x: width + 40, y: groundLevel }); } else { obstacles.push({ x: width, y: groundLevel }); } }
             for (let i = 0; i < obstacles.length; i++) {
                 let obs = obstacles[i]; obs.x -= speed;
                 let hitMargin = 10;
@@ -156,34 +120,24 @@
             }
             obstacles = obstacles.filter(obs => obs.x + 40 > 0);
         }
-
         function draw() {
             let grad = ctx.createLinearGradient(0, 0, 0, height); grad.addColorStop(0, '#D2527F'); grad.addColorStop(1, '#6C3483'); ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
             ctx.fillStyle = '#2E003E'; ctx.fillRect(0, height - 120, width, 120);
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 2; let gridSize = 60; let offsetX = -(frames * speed) % gridSize;
-            for(let x = offsetX; x < width; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height-120); ctx.stroke(); }
-            for(let y = 0; y < height-120; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+            for(let x = offsetX; x < width; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height-120); ctx.stroke(); } for(let y = 0; y < height-120; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
             ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, height - 120); ctx.lineTo(width, height - 120); ctx.stroke();
             for(let t of hero.trail) { ctx.save(); ctx.translate(t.x + hero.size/2, t.y + hero.size/2); ctx.rotate(t.angle); ctx.fillStyle = `rgba(241, 196, 15, ${t.alpha})`; ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.restore(); t.alpha -= 0.1; }
             ctx.save(); ctx.translate(hero.x + hero.size/2, hero.y + hero.size/2); ctx.rotate(hero.angle); ctx.fillStyle = '#F1C40F'; ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.strokeStyle = 'black'; ctx.lineWidth = 3; ctx.strokeRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.fillStyle = '#3498DB'; ctx.fillRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2); ctx.strokeRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2); ctx.restore();
             for (let obs of obstacles) { ctx.save(); ctx.translate(obs.x, obs.y); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(20, -40); ctx.lineTo(40, 0); ctx.closePath(); ctx.fillStyle = 'black'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore(); }
             for (let p of particles) { ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.fillRect(p.x, p.y, 6, 6); ctx.globalAlpha = 1.0; }
         }
-
         function loop() { update(); draw(); requestAnimationFrame(loop); }
-
         function gameOver() {
-            gameRunning = false;
-            bgMusic.pause();
-            createParticles(hero.x, hero.y);
-            
-            // --- ส่งคะแนนเมื่อจบเกม ---
-            saveScoreToTelegram(score);
-            
+            gameRunning = false; bgMusic.pause(); createParticles(hero.x, hero.y);
+            saveScoreToTelegram(score); // ส่งคะแนน
             document.getElementById('startMsg').innerHTML = "CRASHED!<br>Score: " + score + "<br><span style='font-size:16px'>Tap to Restart</span>";
             document.getElementById('startMsg').style.display = 'block';
         }
-
         loop();
     </script>
 </body>
