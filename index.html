@@ -3,18 +3,28 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jump Dash Telegram</title>
+    <title>Jump Dash - Geo Style</title>
     <style>
-        body { margin: 0; padding: 0; background-color: #7DA47D; overflow: hidden; font-family: Arial, sans-serif; }
-        canvas { display: block; margin: 0 auto; background: #7DA47D; }
-        #score { position: absolute; top: 20px; width: 100%; text-align: center; color: white; font-size: 40px; font-weight: bold; pointer-events: none; }
-        #startMsg { position: absolute; top: 50%; width: 100%; text-align: center; color: white; font-size: 20px; transform: translateY(-50%); pointer-events: none; }
+        body { margin: 0; padding: 0; background-color: #202028; overflow: hidden; font-family: 'Arial', sans-serif; }
+        canvas { display: block; margin: 0 auto; background: #202028; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        #score { position: absolute; top: 20px; width: 100%; text-align: center; color: white; font-size: 60px; font-weight: 900; text-shadow: 3px 3px 0 #000; font-family: sans-serif; -webkit-text-stroke: 2px black; }
+        #startMsg { 
+            color: white; font-size: 24px; text-align: center; 
+            background: rgba(0,0,0,0.6); padding: 30px; border-radius: 15px; 
+            border: 3px solid #FFF; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            animation: pulse 1.5s infinite;
+            pointer-events: auto; cursor: pointer;
+        }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
     </style>
     <script src="https://telegram.org/js/games.js"></script>
 </head>
 <body>
     <div id="score">0</div>
-    <div id="startMsg">แตะเพื่อเริ่มเกม</div>
+    <div id="ui-layer">
+        <div id="startMsg" onclick="jump()">TAP TO PLAY<br><span style="font-size:16px; color:#F1C40F">▶ Geometry Style</span></div>
+    </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
@@ -22,122 +32,251 @@
         const ctx = canvas.getContext('2d');
         let width, height;
 
-        // ตัวแปรเกม
+        // --- ตั้งค่าเสียง (bgm.mp3 เท่านั้น) ---
+        const bgMusic = new Audio('bgm.mp3'); 
+        bgMusic.loop = true; 
+        bgMusic.volume = 0.7;
+
+        // --- ตัวแปรเกม ---
         let gameRunning = false;
         let score = 0;
         let frames = 0;
-        let speed = 6;
+        let speed = 9; // ความเร็วสูงขึ้นแบบในคลิป
+        
+        // สีพื้นหลัง (โทนชมพู/ม่วง แบบในคลิป)
+        const bgColors = ['#C0392B', '#9B59B6', '#8E44AD', '#2980B9'];
+        let colorIndex = 1;
 
         // ตัวละคร (Hero)
-        const hero = { x: 50, y: 0, size: 30, dy: 0, jumpPower: -12, gravity: 0.8, grounded: false };
+        const hero = { 
+            x: 100, y: 0, size: 40, // ขนาดใหญ่ขึ้นนิดนึง
+            dy: 0, jumpPower: -15, gravity: 1.1, 
+            grounded: false, angle: 0,
+            trail: [] // เก็บหาง
+        };
         
-        // สิ่งกีดขวาง
         let obstacles = [];
+        let particles = [];
 
         function resize() {
             width = window.innerWidth;
             height = window.innerHeight;
             canvas.width = width;
             canvas.height = height;
-            hero.y = height - 100 - hero.size; // รีเซ็ตตำแหน่ง
+            hero.y = height - 120 - hero.size;
         }
         window.addEventListener('resize', resize);
         resize();
 
         function jump() {
             if (!gameRunning) {
-                gameRunning = true;
-                score = 0;
-                obstacles = [];
-                hero.y = height - 100 - hero.size;
-                document.getElementById('startMsg').style.display = 'none';
-                loop();
+                startGame();
                 return;
             }
             if (hero.grounded) {
                 hero.dy = hero.jumpPower;
                 hero.grounded = false;
+                // เริ่มหมุน (Snap angle)
+                hero.angle = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2);
             }
         }
 
-        // รองรับการแตะหน้าจอหรือคลิกเมาส์
-        window.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); });
-        window.addEventListener('mousedown', jump);
+        function startGame() {
+            gameRunning = true;
+            score = 0;
+            obstacles = [];
+            particles = [];
+            hero.y = height - 120 - hero.size;
+            document.getElementById('startMsg').style.display = 'none';
+            
+            // เล่นเพลง
+            bgMusic.currentTime = 0;
+            bgMusic.play().catch(e => console.log("Audio Error:", e));
+            
+            loop();
+        }
+
+        // การควบคุม (แตะ / คลิก / Spacebar)
+        window.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive: false});
+        window.addEventListener('mousedown', (e) => { if(e.target.id !== 'startMsg') jump(); });
         window.addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });
 
-        function update() {
-            if (!gameRunning) return;
+        function createParticles(x, y) {
+            for(let i=0; i<30; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 20,
+                    vy: (Math.random() - 0.5) * 20,
+                    life: 1.0,
+                    color: `hsl(${Math.random()*60 + 20}, 100%, 50%)` // สีโทนส้มเหลือง
+                });
+            }
+        }
 
-            // ฟิสิกส์ตัวละคร
+        function update() {
+            if (!gameRunning) {
+                particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= 0.05; });
+                particles = particles.filter(p => p.life > 0);
+                return;
+            }
+
+            // ฟิสิกส์ Hero
             hero.dy += hero.gravity;
             hero.y += hero.dy;
+            
+            // หมุนตัว (Rotation)
+            if(!hero.grounded) {
+                hero.angle += 0.15; // หมุนติ้วๆ
+            } else {
+                // Snap ให้ตรงเมื่อถึงพื้น
+                let target = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2);
+                hero.angle += (target - hero.angle) * 0.2;
+            }
 
             // พื้นดิน
-            let groundLevel = height - 100;
+            let groundLevel = height - 120;
             if (hero.y + hero.size > groundLevel) {
                 hero.y = groundLevel - hero.size;
                 hero.dy = 0;
                 hero.grounded = true;
             }
 
-            // สร้างสิ่งกีดขวาง
+            // สร้าง Trail (หางเงา)
+            if(frames % 3 === 0) {
+                hero.trail.push({x: hero.x, y: hero.y, angle: hero.angle, alpha: 0.6});
+                if(hero.trail.length > 5) hero.trail.shift();
+            }
+            // ขยับหางถอยหลังตามฉาก
+            hero.trail.forEach(t => t.x -= speed);
+
+            // สร้างสิ่งกีดขวาง (หนาม)
             frames++;
-            if (frames % 90 === 0) { // สร้างทุกๆ 90 เฟรม
-                let h = 40 + Math.random() * 40; // ความสูงสุ่ม
-                obstacles.push({ x: width, y: groundLevel - h, w: 30, h: h });
+            if (frames % Math.floor(1300/speed) === 0) { // สุ่มระยะห่าง
+                let type = Math.random();
+                if(type > 0.7) {
+                    // หนาม 2 อันติด
+                    obstacles.push({ x: width, y: groundLevel, type: 'spike' });
+                    obstacles.push({ x: width + 40, y: groundLevel, type: 'spike' });
+                } else {
+                    // หนาม 1 อัน
+                    obstacles.push({ x: width, y: groundLevel, type: 'spike' });
+                }
             }
 
-            // ขยับและเช็คชนสิ่งกีดขวาง
+            // จัดการสิ่งกีดขวาง
             for (let i = 0; i < obstacles.length; i++) {
                 let obs = obstacles[i];
                 obs.x -= speed;
 
-                // เช็คชน (Collision)
-                if (hero.x < obs.x + obs.w &&
-                    hero.x + hero.size > obs.x &&
-                    hero.y < obs.y + obs.h &&
-                    hero.y + hero.size > obs.y) {
+                // Hitbox (เช็คชน) - ปรับให้กระชับขึ้น
+                let hitMargin = 8;
+                if (hero.x + hitMargin < obs.x + 40 &&
+                    hero.x + hero.size - hitMargin > obs.x &&
+                    hero.y + hitMargin < obs.y && 
+                    hero.y + hero.size - hitMargin > obs.y - 40) { // หนามสูง 40
                     gameOver();
                 }
 
                 // นับคะแนน
-                if (obs.x + obs.w < hero.x && !obs.passed) {
+                if (obs.x + 40 < hero.x && !obs.passed) {
                     score++;
                     obs.passed = true;
                     document.getElementById('score').innerText = score;
                 }
             }
-            // ลบอันที่พ้นจอ
-            obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
+            obstacles = obstacles.filter(obs => obs.x + 40 > 0);
         }
 
         function draw() {
-            // ล้างจอ
-            ctx.fillStyle = '#7DA47D';
+            // พื้นหลัง (Gradient)
+            let grad = ctx.createLinearGradient(0, 0, 0, height);
+            grad.addColorStop(0, '#D2527F'); // สีชมพูเข้มแบบในคลิป
+            grad.addColorStop(1, '#6C3483'); // สีม่วง
+            ctx.fillStyle = grad;
             ctx.fillRect(0, 0, width, height);
 
-            // วาดพื้น
-            ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(0, height - 100, width, 100);
-
-            // วาดตัวละคร (สีเหลือง)
-            ctx.fillStyle = '#F1C40F';
-            ctx.fillRect(hero.x, hero.y, hero.size, hero.size);
-            ctx.strokeStyle = '#000';
+            // วาดพื้น & Grid Line
+            ctx.fillStyle = '#2E003E'; // พื้นสีม่วงเข้ม
+            ctx.fillRect(0, height - 120, width, 120);
+            
+            // วาดเส้นตารางพื้นหลัง (Grid)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
             ctx.lineWidth = 2;
-            ctx.strokeRect(hero.x, hero.y, hero.size, hero.size);
+            let gridSize = 60;
+            let offsetX = -(frames * speed) % gridSize;
+            for(let x = offsetX; x < width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height-120); ctx.stroke();
+            }
+            for(let y = 0; y < height-120; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+            }
+            
+            // เส้นขอบพื้นตัดขาว
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(0, height - 120); ctx.lineTo(width, height - 120); ctx.stroke();
 
-            // วาดสิ่งกีดขวาง
-            ctx.fillStyle = '#000';
+            // วาดหางเงา (Trail)
+            for(let t of hero.trail) {
+                ctx.save();
+                ctx.translate(t.x + hero.size/2, t.y + hero.size/2);
+                ctx.rotate(t.angle);
+                ctx.fillStyle = `rgba(241, 196, 15, ${t.alpha})`;
+                ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
+                ctx.restore();
+                t.alpha -= 0.1;
+            }
+
+            // วาดตัวละคร (Hero)
+            ctx.save();
+            ctx.translate(hero.x + hero.size/2, hero.y + hero.size/2);
+            ctx.rotate(hero.angle);
+            
+            // ตัวเหลือง
+            ctx.fillStyle = '#F1C40F';
+            ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
+            // ขอบดำ
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
+            
+            // หน้าตา (สี่เหลี่ยมฟ้าตรงกลางแบบ Geometry Dash)
+            ctx.fillStyle = '#3498DB'; // สีฟ้า
+            ctx.fillRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2);
+            ctx.strokeRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2);
+            
+            ctx.restore();
+
+            // วาดสิ่งกีดขวาง (หนามสามเหลี่ยม)
             for (let obs of obstacles) {
-                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-                ctx.strokeStyle = '#FFF';
-                ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+                ctx.save();
+                ctx.translate(obs.x, obs.y); // จุดเริ่มที่พื้น
+                
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(20, -40); // ยอดหนาม
+                ctx.lineTo(40, 0);
+                ctx.closePath();
+                
+                ctx.fillStyle = 'black';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                ctx.restore();
+            }
+
+            // เอฟเฟกต์ระเบิด
+            for (let p of particles) {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.fillRect(p.x, p.y, 6, 6);
+                ctx.globalAlpha = 1.0;
             }
         }
 
         function loop() {
-            if (!gameRunning) return;
             update();
             draw();
             requestAnimationFrame(loop);
@@ -145,14 +284,14 @@
 
         function gameOver() {
             gameRunning = false;
-            document.getElementById('startMsg').innerText = "จบเกม! คะแนน: " + score + "\nแตะเพื่อเล่นใหม่";
-            document.getElementById('startMsg').style.display = 'block';
+            bgMusic.pause();
+            createParticles(hero.x, hero.y);
             
-            // ส่งคะแนนให้ Telegram (ถ้าเปิดผ่าน Telegram)
-            // TelegramGameProxy.shareScore(); 
+            document.getElementById('startMsg').innerHTML = "CRASHED!<br>Score: " + score + "<br><span style='font-size:16px'>Tap to Restart</span>";
+            document.getElementById('startMsg').style.display = 'block';
         }
 
-        // วาดหน้าจอเริ่มเกมครั้งแรก
+        // เริ่มเฟรมแรก
         draw();
     </script>
 </body>
