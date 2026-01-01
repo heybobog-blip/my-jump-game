@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Jump Dash - Geo Style Fixed</title>
+    <title>Jump Dash - Leaderboard</title>
     <style>
         body { margin: 0; padding: 0; background-color: #202028; overflow: hidden; font-family: 'Arial', sans-serif; user-select: none; -webkit-user-select: none; }
         canvas { display: block; margin: 0 auto; background: #202028; touch-action: none; }
@@ -17,40 +17,76 @@
             pointer-events: auto; cursor: pointer; z-index: 20;
         }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        
+        /* Loading Spinner */
+        #loading { display: none; color: yellow; font-size: 14px; margin-top: 10px; }
     </style>
     <script src="https://telegram.org/js/games.js"></script>
 </head>
 <body>
     <div id="score">0</div>
     <div id="ui-layer">
-        <div id="startMsg" onclick="handleStart()">TAP TO PLAY<br><span style="font-size:16px; color:#F1C40F">▶ Geometry Style</span></div>
+        <div id="startMsg" onclick="handleStart()">
+            TAP TO PLAY<br>
+            <span style="font-size:16px; color:#F1C40F">▶ Geometry Style</span>
+            <div id="loading">กำลังบันทึกคะแนน...</div>
+        </div>
     </div>
     <canvas id="gameCanvas"></canvas>
 
     <script>
+        // --- ส่วนตั้งค่าการส่งคะแนน ---
+        // ใส่ลิงก์ของคุณให้เรียบร้อยแล้วครับ
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbwkma8CNPj9gayXeOymVKeXQISPL5Zl5jbrM9FVvZJ8F7DPHWAEEHxmg01YZXKRs7v-OA/exec"; 
+
+        // เริ่มต้น Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // ขยายเต็มจอ
+
+        // ดึงข้อมูลผู้เล่น
+        const user = tg.initDataUnsafe.user;
+        
+        function saveScoreToTelegram(finalScore) {
+            if (!user) {
+                console.log("ไม่พบข้อมูลผู้เล่น (อาจจะเล่นบน Browser ปกติ)");
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('startMsg').innerHTML += "<br><small>Sending Score...</small>";
+
+            // เตรียมข้อมูลส่ง
+            let url = `${GAS_URL}?user_id=${user.id}&score=${finalScore}`;
+            
+            // ใช้ fetch ยิงไปหา Google Script
+            fetch(url)
+            .then(response => response.text())
+            .then(data => {
+                console.log("Save Result:", data);
+                document.getElementById('loading').innerText = "บันทึกคะแนนแล้ว!";
+                setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 2000);
+            })
+            .catch(error => {
+                console.error("Save Error:", error);
+                document.getElementById('loading').innerText = "บันทึกไม่สำเร็จ";
+            });
+        }
+
+        // --- GAME LOGIC ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let width, height;
 
-        // --- ระบบเสียง ---
         const bgMusic = new Audio('bgm.mp3'); 
         bgMusic.loop = true; 
         bgMusic.volume = 0.7;
 
-        // --- ตัวแปรเกม ---
         let gameRunning = false;
-        let isLoopRunning = false; // ตัวกัน Loop ซ้อน
         let score = 0;
         let frames = 0;
         let speed = 9;
         
-        const hero = { 
-            x: 100, y: 0, size: 40, 
-            dy: 0, jumpPower: -15, gravity: 1.1, 
-            grounded: false, angle: 0,
-            trail: [] 
-        };
-        
+        const hero = { x: 100, y: 0, size: 40, dy: 0, jumpPower: -15, gravity: 1.1, grounded: false, angle: 0, trail: [] };
         let obstacles = [];
         let particles = [];
 
@@ -59,256 +95,96 @@
             height = window.innerHeight;
             canvas.width = width;
             canvas.height = height;
-            
-            // ปรับตำแหน่งพื้นตามขนาดจอ
-            let groundY = height - 120;
-            if(!gameRunning) hero.y = groundY - hero.size;
+            if(!gameRunning) hero.y = height - 120 - hero.size;
         }
         window.addEventListener('resize', resize);
         resize();
 
-        // ฟังก์ชันเริ่มเกม (แก้บัคแล้ว: ไม่เรียก Loop ซ้ำ)
         function startGame() {
             gameRunning = true;
-            score = 0;
-            frames = 0;
-            obstacles = [];
-            particles = [];
-            hero.y = height - 120 - hero.size;
-            hero.dy = 0;
-            hero.angle = 0;
-            hero.trail = [];
-            
+            score = 0; frames = 0; obstacles = []; particles = [];
+            hero.y = height - 120 - hero.size; hero.dy = 0; hero.angle = 0; hero.trail = [];
             document.getElementById('startMsg').style.display = 'none';
-            
             bgMusic.currentTime = 0;
             bgMusic.play().catch(e => console.log("Audio Error:", e));
         }
 
-        // ฟังก์ชันกดปุ่มเริ่ม
-        function handleStart() {
-            if (!gameRunning) {
-                startGame();
-            }
-        }
-
-        // ฟังก์ชันกระโดด
+        function handleStart() { if (!gameRunning) startGame(); }
         function jump() {
             if (!gameRunning) {
-                // ถ้าเกมจบอยู่แล้วกดโดด ให้เริ่มเกมใหม่ได้เลย
-                if(document.getElementById('startMsg').style.display !== 'none') {
-                    startGame();
-                }
+                if(document.getElementById('startMsg').style.display !== 'none') startGame();
                 return;
             }
-            
             if (hero.grounded) {
-                hero.dy = hero.jumpPower;
-                hero.grounded = false;
-                // Snap angle เพื่อเริ่มหมุนใหม่
+                hero.dy = hero.jumpPower; hero.grounded = false;
                 hero.angle = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2);
             }
         }
 
-        // การควบคุม (รองรับทั้ง PC และ Mobile)
-        // touchstart: สำหรับมือถือ (ใช้ passive: false เพื่อกันเลื่อนหน้าจอ)
-        window.addEventListener('touchstart', (e) => { 
-            if(e.target.id !== 'startMsg') {
-                e.preventDefault(); 
-                jump(); 
-            }
-        }, {passive: false});
-
-        // mousedown: สำหรับคลิกเมาส์ PC
-        window.addEventListener('mousedown', (e) => { 
-            if(e.target.id !== 'startMsg') jump(); 
-        });
-
-        // keydown: สำหรับ Spacebar
-        window.addEventListener('keydown', (e) => { 
-            if (e.code === 'Space') jump(); 
-        });
+        window.addEventListener('touchstart', (e) => { if(e.target.id !== 'startMsg') { e.preventDefault(); jump(); } }, {passive: false});
+        window.addEventListener('mousedown', (e) => { if(e.target.id !== 'startMsg') jump(); });
+        window.addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });
 
         function createParticles(x, y) {
             for(let i=0; i<30; i++) {
-                particles.push({
-                    x: x, y: y,
-                    vx: (Math.random() - 0.5) * 20,
-                    vy: (Math.random() - 0.5) * 20,
-                    life: 1.0,
-                    color: `hsl(${Math.random()*60 + 20}, 100%, 50%)`
-                });
+                particles.push({ x: x, y: y, vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20, life: 1.0, color: `hsl(${Math.random()*60 + 20}, 100%, 50%)` });
             }
         }
 
         function update() {
-            // ถ้าเกมไม่เล่น ให้ขยับแค่เอฟเฟกต์ระเบิด
             if (!gameRunning) {
                 particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= 0.05; });
                 particles = particles.filter(p => p.life > 0);
                 return;
             }
-
-            // ฟิสิกส์ Hero
-            hero.dy += hero.gravity;
-            hero.y += hero.dy;
-            
-            // หมุนตัว
-            if(!hero.grounded) {
-                hero.angle += 0.15;
-            } else {
-                let target = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2);
-                hero.angle += (target - hero.angle) * 0.2;
-            }
-
-            // พื้นดิน
+            hero.dy += hero.gravity; hero.y += hero.dy;
+            if(!hero.grounded) { hero.angle += 0.15; } else { let target = Math.round(hero.angle / (Math.PI/2)) * (Math.PI/2); hero.angle += (target - hero.angle) * 0.2; }
             let groundLevel = height - 120;
-            if (hero.y + hero.size > groundLevel) {
-                hero.y = groundLevel - hero.size;
-                hero.dy = 0;
-                hero.grounded = true;
-            }
-
-            // Trail
-            if(frames % 3 === 0) {
-                hero.trail.push({x: hero.x, y: hero.y, angle: hero.angle, alpha: 0.6});
-                if(hero.trail.length > 6) hero.trail.shift();
-            }
+            if (hero.y + hero.size > groundLevel) { hero.y = groundLevel - hero.size; hero.dy = 0; hero.grounded = true; }
+            if(frames % 3 === 0) { hero.trail.push({x: hero.x, y: hero.y, angle: hero.angle, alpha: 0.6}); if(hero.trail.length > 6) hero.trail.shift(); }
             hero.trail.forEach(t => t.x -= speed);
-
-            // สร้างสิ่งกีดขวาง
             frames++;
             if (frames % Math.floor(1300/speed) === 0) { 
                 let type = Math.random();
-                if(type > 0.7) {
-                    obstacles.push({ x: width, y: groundLevel, type: 'spike' });
-                    obstacles.push({ x: width + 40, y: groundLevel, type: 'spike' });
-                } else {
-                    obstacles.push({ x: width, y: groundLevel, type: 'spike' });
-                }
+                if(type > 0.7) { obstacles.push({ x: width, y: groundLevel }); obstacles.push({ x: width + 40, y: groundLevel }); } else { obstacles.push({ x: width, y: groundLevel }); }
             }
-
-            // เช็คชนและคะแนน
             for (let i = 0; i < obstacles.length; i++) {
-                let obs = obstacles[i];
-                obs.x -= speed;
-
-                // Hitbox กระชับขึ้น (ลดบัคชนลมตาย)
+                let obs = obstacles[i]; obs.x -= speed;
                 let hitMargin = 10;
-                if (hero.x + hitMargin < obs.x + 40 &&
-                    hero.x + hero.size - hitMargin > obs.x &&
-                    hero.y + hitMargin < obs.y && 
-                    hero.y + hero.size - hitMargin > obs.y - 40) {
-                    gameOver();
-                }
-
-                if (obs.x + 40 < hero.x && !obs.passed) {
-                    score++;
-                    obs.passed = true;
-                    document.getElementById('score').innerText = score;
-                }
+                if (hero.x + hitMargin < obs.x + 40 && hero.x + hero.size - hitMargin > obs.x && hero.y + hitMargin < obs.y && hero.y + hero.size - hitMargin > obs.y - 40) { gameOver(); }
+                if (obs.x + 40 < hero.x && !obs.passed) { score++; obs.passed = true; document.getElementById('score').innerText = score; }
             }
             obstacles = obstacles.filter(obs => obs.x + 40 > 0);
         }
 
         function draw() {
-            // Background
-            let grad = ctx.createLinearGradient(0, 0, 0, height);
-            grad.addColorStop(0, '#D2527F'); 
-            grad.addColorStop(1, '#6C3483'); 
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, width, height);
-
-            // Floor
-            ctx.fillStyle = '#2E003E';
-            ctx.fillRect(0, height - 120, width, 120);
-            
-            // Grid
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 2;
-            let gridSize = 60;
-            let offsetX = -(frames * speed) % gridSize;
-            for(let x = offsetX; x < width; x += gridSize) {
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height-120); ctx.stroke();
-            }
-            for(let y = 0; y < height-120; y += gridSize) {
-                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-            }
-            
-            // Floor Line
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.moveTo(0, height - 120); ctx.lineTo(width, height - 120); ctx.stroke();
-
-            // Trail drawing
-            for(let t of hero.trail) {
-                ctx.save();
-                ctx.translate(t.x + hero.size/2, t.y + hero.size/2);
-                ctx.rotate(t.angle);
-                ctx.fillStyle = `rgba(241, 196, 15, ${t.alpha})`;
-                ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
-                ctx.restore();
-                t.alpha -= 0.1;
-            }
-
-            // Hero drawing
-            ctx.save();
-            ctx.translate(hero.x + hero.size/2, hero.y + hero.size/2);
-            ctx.rotate(hero.angle);
-            ctx.fillStyle = '#F1C40F';
-            ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(-hero.size/2, -hero.size/2, hero.size, hero.size);
-            ctx.fillStyle = '#3498DB'; 
-            ctx.fillRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2);
-            ctx.strokeRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2);
-            ctx.restore();
-
-            // Obstacles drawing
-            for (let obs of obstacles) {
-                ctx.save();
-                ctx.translate(obs.x, obs.y);
-                ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.lineTo(20, -40);
-                ctx.lineTo(40, 0);
-                ctx.closePath();
-                ctx.fillStyle = 'black';
-                ctx.fill();
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // Particles drawing
-            for (let p of particles) {
-                ctx.fillStyle = p.color;
-                ctx.globalAlpha = p.life;
-                ctx.fillRect(p.x, p.y, 6, 6);
-                ctx.globalAlpha = 1.0;
-            }
+            let grad = ctx.createLinearGradient(0, 0, 0, height); grad.addColorStop(0, '#D2527F'); grad.addColorStop(1, '#6C3483'); ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
+            ctx.fillStyle = '#2E003E'; ctx.fillRect(0, height - 120, width, 120);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)'; ctx.lineWidth = 2; let gridSize = 60; let offsetX = -(frames * speed) % gridSize;
+            for(let x = offsetX; x < width; x += gridSize) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height-120); ctx.stroke(); }
+            for(let y = 0; y < height-120; y += gridSize) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
+            ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, height - 120); ctx.lineTo(width, height - 120); ctx.stroke();
+            for(let t of hero.trail) { ctx.save(); ctx.translate(t.x + hero.size/2, t.y + hero.size/2); ctx.rotate(t.angle); ctx.fillStyle = `rgba(241, 196, 15, ${t.alpha})`; ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.restore(); t.alpha -= 0.1; }
+            ctx.save(); ctx.translate(hero.x + hero.size/2, hero.y + hero.size/2); ctx.rotate(hero.angle); ctx.fillStyle = '#F1C40F'; ctx.fillRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.strokeStyle = 'black'; ctx.lineWidth = 3; ctx.strokeRect(-hero.size/2, -hero.size/2, hero.size, hero.size); ctx.fillStyle = '#3498DB'; ctx.fillRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2); ctx.strokeRect(-hero.size/4, -hero.size/4, hero.size/2, hero.size/2); ctx.restore();
+            for (let obs of obstacles) { ctx.save(); ctx.translate(obs.x, obs.y); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(20, -40); ctx.lineTo(40, 0); ctx.closePath(); ctx.fillStyle = 'black'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke(); ctx.restore(); }
+            for (let p of particles) { ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.fillRect(p.x, p.y, 6, 6); ctx.globalAlpha = 1.0; }
         }
 
-        function loop() {
-            update();
-            draw();
-            requestAnimationFrame(loop);
-        }
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
 
         function gameOver() {
             gameRunning = false;
             bgMusic.pause();
             createParticles(hero.x, hero.y);
             
+            // --- ส่งคะแนนเมื่อจบเกม ---
+            saveScoreToTelegram(score);
+            
             document.getElementById('startMsg').innerHTML = "CRASHED!<br>Score: " + score + "<br><span style='font-size:16px'>Tap to Restart</span>";
             document.getElementById('startMsg').style.display = 'block';
         }
 
-        // เริ่ม Loop เกมแค่ครั้งเดียวตรงนี้! (หัวใจสำคัญของการแก้บัค)
         loop();
-
     </script>
 </body>
 </html>
