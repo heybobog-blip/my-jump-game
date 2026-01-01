@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jump Dash Telegram</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #7DA47D; overflow: hidden; font-family: Arial, sans-serif; }
+        canvas { display: block; margin: 0 auto; background: #7DA47D; }
+        #score { position: absolute; top: 20px; width: 100%; text-align: center; color: white; font-size: 40px; font-weight: bold; pointer-events: none; }
+        #startMsg { position: absolute; top: 50%; width: 100%; text-align: center; color: white; font-size: 20px; transform: translateY(-50%); pointer-events: none; }
+    </style>
+    <script src="https://telegram.org/js/games.js"></script>
+</head>
+<body>
+    <div id="score">0</div>
+    <div id="startMsg">แตะเพื่อเริ่มเกม</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // ตัวแปรเกม
+        let gameRunning = false;
+        let score = 0;
+        let frames = 0;
+        let speed = 6;
+
+        // ตัวละคร (Hero)
+        const hero = { x: 50, y: 0, size: 30, dy: 0, jumpPower: -12, gravity: 0.8, grounded: false };
+        
+        // สิ่งกีดขวาง
+        let obstacles = [];
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            hero.y = height - 100 - hero.size; // รีเซ็ตตำแหน่ง
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function jump() {
+            if (!gameRunning) {
+                gameRunning = true;
+                score = 0;
+                obstacles = [];
+                hero.y = height - 100 - hero.size;
+                document.getElementById('startMsg').style.display = 'none';
+                loop();
+                return;
+            }
+            if (hero.grounded) {
+                hero.dy = hero.jumpPower;
+                hero.grounded = false;
+            }
+        }
+
+        // รองรับการแตะหน้าจอหรือคลิกเมาส์
+        window.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); });
+        window.addEventListener('mousedown', jump);
+        window.addEventListener('keydown', (e) => { if (e.code === 'Space') jump(); });
+
+        function update() {
+            if (!gameRunning) return;
+
+            // ฟิสิกส์ตัวละคร
+            hero.dy += hero.gravity;
+            hero.y += hero.dy;
+
+            // พื้นดิน
+            let groundLevel = height - 100;
+            if (hero.y + hero.size > groundLevel) {
+                hero.y = groundLevel - hero.size;
+                hero.dy = 0;
+                hero.grounded = true;
+            }
+
+            // สร้างสิ่งกีดขวาง
+            frames++;
+            if (frames % 90 === 0) { // สร้างทุกๆ 90 เฟรม
+                let h = 40 + Math.random() * 40; // ความสูงสุ่ม
+                obstacles.push({ x: width, y: groundLevel - h, w: 30, h: h });
+            }
+
+            // ขยับและเช็คชนสิ่งกีดขวาง
+            for (let i = 0; i < obstacles.length; i++) {
+                let obs = obstacles[i];
+                obs.x -= speed;
+
+                // เช็คชน (Collision)
+                if (hero.x < obs.x + obs.w &&
+                    hero.x + hero.size > obs.x &&
+                    hero.y < obs.y + obs.h &&
+                    hero.y + hero.size > obs.y) {
+                    gameOver();
+                }
+
+                // นับคะแนน
+                if (obs.x + obs.w < hero.x && !obs.passed) {
+                    score++;
+                    obs.passed = true;
+                    document.getElementById('score').innerText = score;
+                }
+            }
+            // ลบอันที่พ้นจอ
+            obstacles = obstacles.filter(obs => obs.x + obs.w > 0);
+        }
+
+        function draw() {
+            // ล้างจอ
+            ctx.fillStyle = '#7DA47D';
+            ctx.fillRect(0, 0, width, height);
+
+            // วาดพื้น
+            ctx.fillStyle = '#2c3e50';
+            ctx.fillRect(0, height - 100, width, 100);
+
+            // วาดตัวละคร (สีเหลือง)
+            ctx.fillStyle = '#F1C40F';
+            ctx.fillRect(hero.x, hero.y, hero.size, hero.size);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(hero.x, hero.y, hero.size, hero.size);
+
+            // วาดสิ่งกีดขวาง
+            ctx.fillStyle = '#000';
+            for (let obs of obstacles) {
+                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                ctx.strokeStyle = '#FFF';
+                ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+            }
+        }
+
+        function loop() {
+            if (!gameRunning) return;
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            document.getElementById('startMsg').innerText = "จบเกม! คะแนน: " + score + "\nแตะเพื่อเล่นใหม่";
+            document.getElementById('startMsg').style.display = 'block';
+            
+            // ส่งคะแนนให้ Telegram (ถ้าเปิดผ่าน Telegram)
+            // TelegramGameProxy.shareScore(); 
+        }
+
+        // วาดหน้าจอเริ่มเกมครั้งแรก
+        draw();
+    </script>
+</body>
+</html>
